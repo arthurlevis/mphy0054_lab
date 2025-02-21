@@ -10,3 +10,16 @@ This stack contains the code template for achieving the first coursework. Studen
 1. Even if your code in cw1q5b is perfect, the frames you define will not align perfectly with the rviz model because the DH parameters are based on the simplified version. This discrepancy will not affect your marks in any way.
 2. cw1q5c and cw1q5d require you to read the xacro file. It is basically a robot model for simulation, defining where robot parts, frames, links ond joints are in the model. This question may take you some time to work it out, but it is expected as it is the hardest question of this coursework.
 3. The joint positions in the hardware interface and the ones that result from forward kinematics are usually similar and most of the time you are not required to account for offsets. However, this is not the case with the youbot manipulator. Please take a look at the "origin, rpy" and "limit" in the xacro file noted in question 5c and work out how to change the joint inputs accordingly. Without any modification, your robot arm may end up moving in the opposite direction or have an offset in the joint position you have not accounted for.
+
+--------------------------------------------------------------------------------------------------
+
+# Instructions on how to run the following scripts:
+
+`cw1q4_node.py`
+	1. Start a ROS Master by running 'roscore'.
+	2. In a second terminal tab, run the python script with 'rosrun cw1q4 cw1q4_node.py'.
+	3. In a third terminal tab, run the quat2zyx and quat2rodrigues services with 'rosservice 		call' (e.g., 'rosservice call /quat2zyx "q: {x: 0, y: 0, z: 0, w: 0}"')
+
+`cw1q5b_node.py`: Run the launch file with 'roslaunch cw1q5 cw1q5b.launch' (make sure no ROS Master is active)
+
+`cw1q5d_node.py`: Run the launch file with 'roslaunch cw1q5 cw1q5d.launch' (make sure no ROS Master is active)

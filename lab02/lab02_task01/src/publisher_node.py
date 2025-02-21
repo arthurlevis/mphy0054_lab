@@ -12,7 +12,9 @@ def talker():
     rate = rospy.Rate(10) # 10hz
     count = 0
     while not rospy.is_shutdown():
-        #: Create a message and publish it. Your message should be a random number between 0 and the variable 'count'
+        
+        #: Create a message and publish it
+        # Your message should be a random number between 0 and the variable 'count'
         data=random.randint(0,count)
         pub.publish(data)
         

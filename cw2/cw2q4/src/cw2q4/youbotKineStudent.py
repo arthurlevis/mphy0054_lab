@@ -2,6 +2,7 @@
 
 import numpy as np
 from cw2q4.youbotKineBase import YoubotKinematicBase
+from cw2q4.youbotKineKDL import YoubotKinematicKDL
 
 
 class YoubotKinematicStudent(YoubotKinematicBase):
@@ -76,6 +77,30 @@ class YoubotKinematicStudent(YoubotKinematicBase):
         # For your solution to match the KDL Jacobian, z0 needs to be set [0, 0, -1] instead of [0, 0, 1], since that is how its defined in the URDF.
         # Both are correct.
         
+        # Initialise Jacobian
+        jacobian = np.zeros((6, 5))
+        
+        # Base frame z-vector & origin
+        z0 = [np.array([0, 0, -1])]
+        o0 = [np.zeros(3)]
+        
+        # Compute FK for each joint
+        for i in range(5):
+            T = self.forward_kinematics(joint, i+1)
+            z0.append(T[0:3, 2])
+            o0.append(T[0:3, 3])
+        
+        # add +1 because range(5) excludes 5, so it misses the last joint
+            
+        # Compute Jacobian for each joint
+        for i in range(5):
+            # Linear velocity Jv
+            jacobian[0:3, i] = np.cross(z0[i], o0[-1] - o0[i])
+            # Angular velocity Jw
+            jacobian[3:6, i] = z0[i]
+        
+        # index -1 in o0 refers to the last element (end effector)
+        
         # Your code ends here ------------------------------
 
         assert jacobian.shape == (6, 5)
@@ -96,8 +121,41 @@ class YoubotKinematicStudent(YoubotKinematicBase):
         assert len(joint) == 5
         
         # Your code starts here ----------------------------
+        
+        jacobian = self.get_jacobian(joint)
+        JTJ = jacobian.T @ jacobian
+        singularity = bool(np.abs(np.linalg.det(JTJ)) < 1e-6)  # select suitable magnitude
 
         # Your code ends here ------------------------------
 
         assert isinstance(singularity, bool)
         return singularity
+
+
+# Check solutions 
+
+base_robot = YoubotKinematicBase()  # contains joint limits
+kdl_robot = YoubotKinematicKDL()  # ground truth
+my_robot = YoubotKinematicStudent()
+
+max_diff = 0
+singularities_found = []
+
+# Iterate over each joint (step = 1 rad)
+for j1 in range(int(base_robot.joint_limit_min[0]), int(base_robot.joint_limit_max[0] + 1)):
+    for j2 in range(int(base_robot.joint_limit_min[1]), int(base_robot.joint_limit_max[1] + 1)):
+        for j3 in range(int(base_robot.joint_limit_min[2]), int(base_robot.joint_limit_max[2] + 1)):
+            for j4 in range(int(base_robot.joint_limit_min[3]), int(base_robot.joint_limit_max[3] + 1)):
+                for j5 in range(int(base_robot.joint_limit_min[4]), int(base_robot.joint_limit_max[4] + 1)):
+                    test_joints = [j1, j2, j3, j4, j5]
+                    
+                    kdl_jacobian = kdl_robot.get_jacobian(test_joints)
+                    my_jacobian = my_robot.get_jacobian(test_joints)
+                    
+                    max_diff = max(max_diff, np.max(np.abs(kdl_jacobian - my_jacobian)))
+                    
+                    if my_robot.check_singularity(test_joints):
+                        singularities_found.append(test_joints)
+
+print(f"Maximum difference: {max_diff}")
+print(f"Singular configurations found: {len(singularities_found)}")

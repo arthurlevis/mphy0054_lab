@@ -2,6 +2,7 @@
 
 import numpy as np
 from cw3q2.iiwa14DynBase import Iiwa14DynamicBase
+from cw3q2.iiwa14DynKDL import Iiwa14DynamicKDL
 
 
 class Iiwa14DynamicRef(Iiwa14DynamicBase):
@@ -60,6 +61,24 @@ class Iiwa14DynamicRef(Iiwa14DynamicBase):
 
         # Your code starts here ----------------------------
 
+        # Initialize jacobian & list of transforms
+        jacobian = np.zeros((6,7))
+        T_list = []
+
+        # COM position vector of link i
+        Tcm_i = self.forward_kinematics_centre_of_mass(joint_readings, up_to_joint)
+        pl_i   = Tcm_i[0:3,3]
+
+        for j in range(up_to_joint):
+            
+            T_list.append(self.forward_kinematics(joint_readings, j))
+            T = T_list[j]  # homegenous transform
+            z = T[:3,2]    # rotation axis
+            p = T[:3,3]    # joint frame position vector
+
+            # Linear & angular components (lecture 9 slide 14)
+            jacobian[:3, j] = np.cross(z, (pl_i - p))
+            jacobian[3:, j] = z       
 
         # Your code ends here ------------------------------
 
@@ -96,12 +115,35 @@ class Iiwa14DynamicRef(Iiwa14DynamicBase):
         """
         B = np.zeros((7, 7))
         
-	# Your code starts here ------------------------------
+	    # Your code starts here ------------------------------
 
-        
+        for i in range(1,8): 
+
+            # Mass
+            m = self.mass[i-1]
+            d = self.link_cm [i-1]
+
+            # Jacobian at CoM
+            jacobian = self.get_jacobian_centre_of_mass(joint_readings, i)
+            Jp = jacobian[:3, :]
+            Jo = jacobian[3:, :]
+
+            # Inertia tensor about frame origin
+            # self.Ixyz contains principal moments of inertia (urdf: cross products = 0)
+            Ig = np.diag(self.Ixyz[i-1])
+            Io = Ig + m * (np.dot(d,d) * np.eye(3) - np.outer(d,d))  # Parallel-Axis theorem
+            
+            # Inertia tensor about frame origin, expressed in the base frame
+            Tcm = self.forward_kinematics_centre_of_mass(joint_readings, i)
+            Rcm = Tcm[:3,:3]
+            Jl = (Rcm @ Io) @ Rcm.T  # lecture 9 slide 12
+
+            # Inertia matrix (lecture 9 slide 15)
+            B += m * (Jp.T @ Jp) + (Jo.T @ Jl) @ Jo
+
         # Your code ends here ------------------------------
         
-	return B
+        return B
 
     def get_C_times_qdot(self, joint_readings, joint_velocities):
         """Given the joint positions and velocities of the robot, compute Coriolis terms C.
@@ -119,6 +161,34 @@ class Iiwa14DynamicRef(Iiwa14DynamicBase):
 
         # Your code starts here ------------------------------
         
+        # Initialize h & C
+        h = np.zeros((7,7,7))
+        C = np.zeros(7)
+
+        q_plus = joint_readings.copy()
+        eps = 1e-6
+
+        # Lecture 9 slide 18 & lab 9 slide 13
+        for i in range(7):
+            for j in range(7):
+                for k in range(7):
+
+                    # Derivative
+                    # db/dq = (b(q_plus)-b(q))/ eps
+
+                    q_plus[k] += eps
+                    db_ij_dq_k = (self.get_B(q_plus)[i,j] - self.get_B(joint_readings)[i,j]) / eps
+                    q_plus[k] -= eps  # reset
+
+                    q_plus[i] += eps
+                    db_jk_dq_i = (self.get_B(q_plus)[j,k] - self.get_B(joint_readings)[j,k]) / eps
+                    q_plus[i] -= eps  # reset
+
+                    # h
+                    h[i,j,k] = db_ij_dq_k - 0.5 * db_jk_dq_i
+
+                    # C times qdot
+                    C[i] += h[i,j,k] * joint_velocities[k]  
 
         # Your code ends here ------------------------------
 
@@ -139,9 +209,65 @@ class Iiwa14DynamicRef(Iiwa14DynamicBase):
 
         # Your code starts here ------------------------------
 
+        g = np.zeros(7)
+        eps = 1e-6
+        q_plus = joint_readings.copy()
+
+        # Lecture 9 slide 16
+        for n in range(7):
+            P = 0
+            P_plus = 0
+            
+            # Potential energy P
+            for i in range(7):
+                Tcm = self.forward_kinematics_centre_of_mass(joint_readings, i+1)
+                P -= self.mass[i] * np.dot(np.array([0,0,-self.g]), Tcm[:3,3])
+
+            # incremented P
+            q_plus[n] += eps
+            for i in range(7):
+                Tcm = self.forward_kinematics_centre_of_mass(q_plus, i+1)
+                P_plus -= self.mass[i] * np.dot(np.array([0,0,-self.g]), Tcm[:3,3])
+            
+            g[n] = (P_plus - P)/eps
+            q_plus[n] -= eps
 
         # Your code ends here ------------------------------
 
         assert isinstance(g, np.ndarray)
         assert g.shape == (7,)
         return g
+
+
+# VERIFY 
+base_robot = Iiwa14DynamicBase()
+kdl_robot = Iiwa14DynamicKDL()
+my_robot = Iiwa14DynamicRef()
+
+# Joints & velocities (random values)
+test_joints = [
+    np.random.uniform(base_robot.joint_limit_min[i], base_robot.joint_limit_max[i]) 
+    for i in range(7)
+    ]
+test_velocities = np.random.uniform(0.2, 1, 7).tolist()
+
+#  Jacobian
+my_jacobian = my_robot.get_jacobian_centre_of_mass(test_joints)
+
+# B
+kdl_B = kdl_robot.get_B(test_joints)
+my_B = my_robot.get_B(test_joints) 
+max_diff_B =  np.max(np.abs(kdl_B - my_B))
+print(f"Maximum error, B: {max_diff_B}")  # < 0.1
+
+# C_times_qdot
+kdl_C = kdl_robot.get_C_times_qdot(test_joints, test_velocities)
+my_C = my_robot.get_C_times_qdot(test_joints, test_velocities)
+max_diff_C =  np.max(np.abs(kdl_C - my_C))
+print(f"Maximum error, C times qdot: {max_diff_C}")  # < 1
+
+# g
+kdl_g = kdl_robot.get_G(test_joints)
+my_g = my_robot.get_G(test_joints)
+max_diff_g =  np.max(np.abs(kdl_g - my_g))
+print(f"Maximum error, g: {max_diff_g}")  # < 0.05

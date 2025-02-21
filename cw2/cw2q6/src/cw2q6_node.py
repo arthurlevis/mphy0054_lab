@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+
 import numpy as np
 import rospy
 import rosbag
@@ -43,6 +44,8 @@ class YoubotTrajectoryPlanning(object):
             given time period.
         """
         # Steps to solving Q6.
+
+        # Steps to solving Q6.
         # 1. Load in targets from the bagfile (checkpoint data and target joint positions).
         # 2. Compute the shortest path achievable visiting each checkpoint Cartesian position.
         # 3. Determine intermediate checkpoints to achieve a linear path between each checkpoint and have a full list of
@@ -51,6 +54,31 @@ class YoubotTrajectoryPlanning(object):
         # 5. Create a JointTrajectory message.
 
         # Your code starts here ------------------------------
+
+        # 1. 
+        target_cart_tf, target_joint_positions = self.load_targets()
+        # 2. 
+        sorted_order, min_dist = self.get_shortest_path(checkpoints_tf = target_cart_tf)
+        # 3.
+        full_checkpoint_tfs = self.intermediate_tfs(sorted_order, target_cart_tf, num_points=5)
+        # 4. 
+        q_checkpoints = self.full_checkpoints_to_joints(
+            full_checkpoint_tfs,
+            init_joint_position = self.kdl_youbot.kdl_jnt_array_to_list(self.kdl_youbot.current_joint_position)
+            )
+        # 5.
+        traj = JointTrajectory()
+
+        self.publish_traj_tfs(full_checkpoint_tfs)
+        elapsed_time = 20  # total time
+        interval = 1  # time between each movement
+
+        for i in range(q_checkpoints.shape[1]):
+            trajectory_point = JointTrajectoryPoint()
+            trajectory_point.positions = q_checkpoints[:, i]
+            elapsed_time += interval
+            trajectory_point.time_from_start.secs = elapsed_time
+            traj.points.append(trajectory_point)
 
         # Your code ends here ------------------------------
 
@@ -84,6 +112,29 @@ class YoubotTrajectoryPlanning(object):
 
         # Your code starts here ------------------------------
 
+        # Load target joint positions & convert them into Cartesian transforms using FK 
+        for i, (_, msg, _) in enumerate(bag.read_messages(topics=["joint_data"])):
+
+            target_joint_positions[:, i+1] = msg.position
+            target_cart_tf[:, :, i+1] = self.kdl_youbot.forward_kinematics(target_joint_positions[:, i+1])
+        
+        # Initial end-effector positions 
+        initial_end_effector_position = target_cart_tf[:3, -1, 0]
+        print(f"Initial end-effector position: {initial_end_effector_position}")
+
+        # Target end-effector positions 
+        ch1_end_effector_position = target_cart_tf[:3, -1, 1]
+        print(f"Checkpoint 1 end-effector position: {ch1_end_effector_position}")
+
+        ch2_end_effector_position = target_cart_tf[:3, -1, 2]
+        print(f"Checkpoint 2 end-effector position: {ch2_end_effector_position}")
+
+        ch3_end_effector_position = target_cart_tf[:3, -1, 3]
+        print(f"Checkpoint 3 end-effector position: {ch3_end_effector_position}")
+
+        ch4_end_effector_position = target_cart_tf[:3, -1, 4]
+        print(f"Checkpoint 4 end-effector position: {ch4_end_effector_position}")
+
         # Your code ends here ------------------------------
 
         # Close the bag
@@ -108,6 +159,33 @@ class YoubotTrajectoryPlanning(object):
         """
 
         # Your code starts here ------------------------------
+
+        # Get xyz coordinates from transforms
+        xyz = checkpoints_tf[0:3, -1, :]  
+        
+        # Calculate distance matrix
+        distance_matrix = np.zeros((5, 5))
+        for i in range(5):
+            for j in range(5):
+                distance_matrix[i, j] = np.linalg.norm(xyz[:, i] - xyz[:, j])
+                
+        # Only permute points 1-4 (initial point 0 must be fixed)
+        min_dist = float('inf')
+        best_path = None
+        remaining_points = list(range(1, 5))
+        
+        from itertools import permutations
+        for perm in permutations(remaining_points):
+            path = [0] + list(perm)  # fixed initial point
+            dist = sum(distance_matrix[path[i]][path[i+1]] for i in range(4))
+            if dist < min_dist:
+                min_dist = dist
+                best_path = path
+                
+        sorted_order = np.array(best_path)
+
+        print(f"Shortest path: {sorted_order}")
+        print(f"Path distance: {min_dist}")
 
         # Your code ends here ------------------------------
 
@@ -158,6 +236,22 @@ class YoubotTrajectoryPlanning(object):
         """
 
         # Your code starts here ------------------------------
+
+        # Initialize output
+        full_checkpoint_tfs = np.zeros((4, 4, 4*num_points + 5))
+
+        # Loop through the sorted checkpoints except the last one
+        for i in range(sorted_checkpoint_idx.size - 1):
+            full_checkpoint_tfs[:, :, i*(num_points+1)] = target_checkpoint_tfs[:, :, sorted_checkpoint_idx[i]]
+            
+            full_checkpoint_tfs[:, :, i*num_points+1+i:(i+1)*num_points+1+i] = self.decoupled_rot_and_trans(
+                target_checkpoint_tfs[:, :, sorted_checkpoint_idx[i]],
+                target_checkpoint_tfs[:, :, sorted_checkpoint_idx[i+1]], 
+                num_points
+            )
+        
+        # Add final checkpoint
+        full_checkpoint_tfs[:, :, -1] = target_checkpoint_tfs[:, :, sorted_checkpoint_idx[-1]]
         
         # Your code ends here ------------------------------
        
@@ -177,6 +271,34 @@ class YoubotTrajectoryPlanning(object):
 
         # Your code starts here ------------------------------
 
+        # Time step between 0 & 1
+        delta_time = 1/(num_points+1)
+
+        # Extract translation & rotation matrices from checkpoints
+        start_position = checkpoint_a_tf[:3, -1]
+        end_position = checkpoint_b_tf[:3, -1]
+
+        start_rotation = checkpoint_a_tf[:3, :3]
+        end_rotation = checkpoint_b_tf[:3, :3]
+
+        #  Initialize output
+        tfs = np.zeros([4, 4, num_points])
+
+        # Decouple translation & rotation
+        for step in range(num_points):
+
+            t = (step+1)*delta_time
+
+            # Interpolate position
+            tfs[0:3, -1, step] = start_position + t * (end_position - start_position)
+           
+            # Interpolate rotation
+            from scipy.linalg import logm, expm  # use scipy instead of numpy for numerical stability
+            tfs[:3, :3, step] = start_rotation @ expm(logm(start_rotation.T @ end_rotation) * t)
+           
+            tfs[3, :3, step] = 0
+            tfs[3, 3, step] = 1
+
         # Your code ends here ------------------------------
 
         return tfs
@@ -194,6 +316,21 @@ class YoubotTrajectoryPlanning(object):
         """
         
         # Your code starts here ------------------------------
+
+        # Initialize
+        q_checkpoints = np.zeros([5, full_checkpoint_tfs.shape[2]])
+
+        # Calculate the joint positions of the first checkpoint using initial joint positions
+        q_checkpoints[:, 0], _ = self.ik_position_only(
+            full_checkpoint_tfs[:, :, 0], init_joint_position
+            )
+
+        # Calculate the remaining joint positions
+        for i in range(1, full_checkpoint_tfs.shape[2]):
+            
+            q_checkpoints[:, i], _ = self.ik_position_only(
+                full_checkpoint_tfs[:, :, i], q_checkpoints[:, i-1]
+                )
 
         # Your code ends here ------------------------------
 
@@ -213,6 +350,44 @@ class YoubotTrajectoryPlanning(object):
         # Jacobian that will affect the position of the error.
 
         # Your code starts here ------------------------------
+
+        # Set hyperparameters
+        alpha = 0.5  # learning rate
+        max_iter = 200  # maximum iterations
+        tolerance = 0.01  # error tolerance
+
+        # Initialize error to a large value
+        error = 1
+
+        # Initialise joint angles
+        q = list(np.array(q0).ravel())
+        
+        # Target end-effector position
+        target_end_effector_position = pose[:3, -1]
+
+        # IK
+        for i in range(max_iter):
+        
+            if error < tolerance:
+                break
+           
+            # Calculate the current position of the end-effector using FK
+            x = np.array(self.kdl_youbot.forward_kinematics(q))[0:3, -1]
+           
+            # Calculate the Jacobian matrix
+            Jacobian = self.kdl_youbot.get_jacobian(q)[0:3, :]
+           
+            # Calculate the error between target position (xe) & current position (x)
+            error = np.linalg.norm(target_end_effector_position-x)
+           
+            # Update the joint positions based on the Jacobian & error
+            q = q + alpha * Jacobian.T.dot(target_end_effector_position - x)
+           
+            # Convert the updated joint positions back to a list
+            q = list(np.array(q).ravel())
+
+        # Convert the final joint positions to a real number array
+        q = np.array(q).real
         
         # Your code ends here ------------------------------
 

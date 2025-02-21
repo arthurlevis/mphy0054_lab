@@ -3,56 +3,40 @@
 import rospy
 import numpy as np
 
-from lab03_example_srv.srv import point_rot, point_rotResponse
+from lab03_example_srv.srv import point_rotResponse
+from lab03_example_srv.srv import point_rot
 
-def handle_point_rotation(request):
-    px = request.p.x
-    py = request.p.y
-    pz = request.p.z
+def handle_point_rotation(req):
 
-    p =np.array([px, py, pz])
+    px = req.p.x
+    py = req.p.y
+    pz = req.p.z
 
-    qx = request.q.x
-    qy = request.q.y
-    qz = request.q.z
-    qw = request.q.w
+    qx = req.q.x
+    qy = req.q.y
+    qz = req.q.z
+    qw = req.q.w
 
-    response = point_rotResponse()
+    # service mechanism: request instance automatically passed on to function from client
+    # through a service called 'rotate_pt' --> no need to create it in the server node
 
-    qxx =  qx **2
-    qyy =  qy **2
-    qzz =  qz **2
+    qxs = np.power(qx,2)
+    qys = np.power(qy,2)
+    qzs = np.power(qz,2)
 
-    R = np.zeros((3, 3))
+    res = point_rotResponse()
 
-    R[0,0] = 1 - 2*qyy-qzz
-    R[1,1] = 1 - 2*qxx-qzz
-    R[2,2] = 1 - 2*qxx-qyy
+    # Quaternion to rotation matrix
+    res.out_p.x = px * (1 - 2*qys - 2*qzs) + py * (2*(qx*qy - qz*qw)) + pz*  (2*(qx*qz - qy*qw))
+    res.out_p.y = px * (2*(qx*qy + qz*qw)) + py * (1 - 2*qxs - 2*qzs) + pz * (2*(qy*qz - qx*qw))
+    res.out_p.z = px * (2*(qx*qz - qy*qw)) + py * (2*(qy*qz + qx*qw)) + pz * (1 - 2*qys - 2*qxs)
 
-    R[0,1] = 2*qx*qy + qz*qw
-    R[0,2] = 2*qx*qz - qy*qw
+    return res
 
-    R[1,0] = 2*qx *qy - 2*qz*qw
-    R[1,2] = 2*qy*qz + 2*qx*qw
-
-    R[2,0] = 2*qx*qz + 2*qy*qw
-    R[2,1] = 2*qy*qz - 2*qx*qw
-
-    result = np.dot(R, p) #3x3 * 3x1 = 3x1
-    
-    response.out_p.x = result[0]
-    response.out_p.y = result[1]
-    response.out_p.z = result[2]
-
-    return response
-
-
-
-
-def rotation_point_service():
+def rortate_point_service():
     rospy.init_node('rotate_point', anonymous=True)
-    rospy.Service('rotate_pt', point_rot, handle_point_rotation)
-    rospy.spin()
+    s = rospy.Service('rotate_pt', point_rot, handle_point_rotation)
+    rospy.spin()  # maintains service node active to handle requests
 
-if __name__ == "__main__":
-    rotation_point_service()
+if __name__ == '__main__':
+    rortate_point_service()

@@ -1,39 +1,42 @@
-#! /usr/bin/env python3
+#!/usr/bin/env python3
 
 import rospy
 import numpy as np
 import random
 import time
 
-#TODO: import the SRV file from its corresponding folder, as well as its Request
-from lab03_example_srv.srv import point_rot, point_rotRequest
+from lab03_example_srv.srv import point_rotRequest
+from lab03_example_srv.srv import point_rot
 
 def point_rotation_client():
+    
     rospy.wait_for_service('rotate_pt')
-    client = rospy.ServiceProxy('rotate_pt', point_rot)
-    request = point_rotRequest()
-
+    
+    # no need to initialize a new ROS node because client is only connecting to a server
+    # (no additional id or logging)    
+    
     while not rospy.is_shutdown():
+        
+        client = rospy.ServiceProxy('rotate_pt', point_rot)  # communication with server
+        req = point_rotRequest()
 
-        request.p.x = random.uniform(-2.0, 2.0)
-        request.p.y = random.uniform(-2.0, 2.0)
-        request.p.z = random.uniform(-2.0, 2.0)
+        req.p.x = random.uniform(-2.0, 2.0)
+        req.p.y = random.uniform(-2.1, 2.3)
+        req.p.z = random.uniform(-1.0, 1.0)
 
-        print(request)
+        quaternion = np.random.rand(4)  # array of four numbers between 0 & 1
+        quaternion = quaternion / np.linalg.norm(quaternion)  # normalises the quaternion
 
+        req.q.x = quaternion[0]
+        req.q.y = quaternion[1]
+        req.q.z = quaternion[2]
+        req.q.w = quaternion[3]
 
-        quaternion = np.random.rand(4)
-        quaternion /= np.linalg.norm(quaternion)
+        res = client(req)  # initialises request & returns response
 
-        request.q.x = quaternion[0]
-        request.q.y = quaternion[1]
-        request.q.z = quaternion[2]
-        request.q.w = quaternion[3]
+        print(res)
 
-        response = client(request)
-        print(response)
-
-        time.sleep(3)
+        time.sleep(3)  # 3 seconds before next request
 
 if __name__ == '__main__':
     try:

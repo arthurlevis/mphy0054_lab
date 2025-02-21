@@ -47,13 +47,17 @@ fall on the exact joint positions of the Youbot.
 
 
 # TODO: populate the values inside the youbot_dh_parameters dictionary with the ones you found in question 5c.
-youbot_dh_parameters = {'a':[, , , , ],
-                        'alpha': [, , , , ],
-                        'd' : [, , , , ],
-                        'theta' : [, , , , ]}
+youbot_dh_parameters = {'a':[-0.024+0.024+0.033, 0.155, 0.135, -0.002, 0],
+                        'alpha': [-np.pi/2, 0, 0, np.pi/2, 0],               
+                        'd' : [0.030+0.096+0.019, 0, 0, 0, 0.130],
+                        'theta' : [0, -np.pi/2, 0, np.pi/2, 0]}
 
 # TODO: populate the values inside the youbot_joint_offsets dictionary with the ones you found in question 5c.
-youbot_joint_offsets = [, , , , ]
+youbot_joint_offsets = [170*np.pi/180,
+                        -65*np.pi/180, 
+                        146*np.pi/180, 
+                        -102.5*np.pi/180, 
+                        167.5*np.pi/180]
 
 youbot_dh_offset_paramters = youbot_dh_parameters.copy()
 
@@ -111,12 +115,33 @@ def fkine_wrapper(joint_msg, br):
     assert isinstance(joint_msg, JointState), "Node must subscribe to a topic where JointState messages are published"
     
     # your code starts here ------------------------------
-    #depending on the dh parameters you may need to change the sign of some angles here
+    # depending on the dh parameters you may need to change the sign of some angles here
     
+    joint_angles = joint_msg.position
+
+    transform = TransformStamped()
+
+    for i in range (5):
+        # Compute the forward kinematics up to the last joint
+        T = forward_kinematics(youbot_dh_offset_paramters, list(joint_angles), up_to_joint=i+1)
+
+        # Define the transformation timestamp & frames (parent & child)
+        transform.header.stamp = rospy.Time.now()
+        transform.header.frame_id = 'base_link'
+        transform.child_frame_id = f'arm5d_link_{i+1}' 
+        
+        # Populate the transform field (translation & rotation)
+        transform.transform.translation.x = T[0, 3]
+        transform.transform.translation.y = T[1, 3]
+        transform.transform.translation.z = T[2, 3]
+
+        R = T[:3,:3]
+        transform.transform.rotation = rotmat2q(R)
+        
+        # Broadcast the transform to tf2
+        br.sendTransform(transform)
         
     # your code ends here ------------------------------
-
-
 
 
 def main():
@@ -129,7 +154,7 @@ def main():
     # as callback and pass the broadcaster as an additional argument to the callback
     
     # your code starts here ------------------------------
-
+    sub = rospy.Subscriber('/joint_states', JointState, fkine_wrapper, br)
     # your code ends here ----------------------
     
     rospy.spin()
